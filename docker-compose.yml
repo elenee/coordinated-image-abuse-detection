@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: moderation
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -27,6 +27,18 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+
+  api:
+    build:
+      context: ./api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - worker
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/moderation
+      - WORKER_URL=http://worker:8000
 
 volumes:
   postgres_data:

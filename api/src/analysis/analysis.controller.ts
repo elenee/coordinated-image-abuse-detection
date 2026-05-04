@@ -2,13 +2,14 @@ import { Controller, Post, Body, UseInterceptors, UploadedFile, BadRequestExcept
 import { AnalysisService } from './analysis.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AnalyzeImageDto } from './dto/analyze-image.dto';
+import { memoryStorage } from 'multer';
 
 @Controller('analysis')
 export class AnalysisController {
   constructor(private readonly analysisService: AnalysisService) {}
 
   @Post()
-  @UseInterceptors(FileInterceptor('image'))
+  @UseInterceptors(FileInterceptor('image', { storage: memoryStorage() }))
   async analyze(@UploadedFile() file: Express.Multer.File, @Body() analyzeImageDto: AnalyzeImageDto) {
     if(!file) {
       throw new BadRequestException('Image file is required')
