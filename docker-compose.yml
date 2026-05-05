@@ -27,7 +27,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-
+      - BURST_THRESHOLD=3
+      
   api:
     build:
       context: ./api

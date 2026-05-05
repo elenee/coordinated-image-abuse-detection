@@ -7,13 +7,21 @@ from pydantic import BaseModel
 from typing import Optional
 import json
 import time
+import os
 
 app = FastAPI()
 
-r = redis.Redis(host="redis", port=6379, decode_responses=True)
+r = redis.Redis(
+    host=os.getenv("REDIS_HOST", "redis"),
+    port=int(os.getenv("REDIS_PORT", "6379")),
+    decode_responses=True
+)
 
 HASH_WINDOW_SECONDS = 86400
 SIMILARITY_THRESHOLD = 10
+
+BURST_THRESHOLD = int(os.getenv("BURST_THRESHOLD", "3"))
+
 
 
 class FingerprintResult(BaseModel):
@@ -50,13 +58,14 @@ async def fingerprint(
                 entries = r.lrange(k, 0, -1)
                 for e in entries:
                     parsed = json.loads(e)
-                    if parsed["userId"] != userId:
+                    now = time.time()
+                    if parsed["userId"] != userId and (now - parsed["timestamp"]) <= HASH_WINDOW_SECONDS:
                         similar_users.append(parsed["userId"])
         except Exception:
             continue
 
     similar_users = list(set(similar_users))
-    burst_detected = len(similar_users) >= 2
+    burst_detected = len(similar_users) >= BURST_THRESHOLD
 
     return FingerprintResult(
         pHash=phash,
