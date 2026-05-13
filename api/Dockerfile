@@ -14,4 +14,6 @@ RUN npm run build
 
 RUN ls -al /app/dist
 
+RUN mkdir -p /uploads
+
 CMD ["node", "dist/src/main.js"]

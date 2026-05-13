@@ -16,6 +16,7 @@ model Job {
   userId    String
   mimeType  String
   sizeBytes Int
+  status    String    @default("queued")
   createdAt DateTime  @default(now())
   analysis  Analysis?
 }
@@ -25,13 +26,13 @@ model Analysis {
   jobId          String   @unique
   job            Job      @relation(fields: [jobId], references: [id])
   pHash          String
-  harmScore      Float
+  harmScore      Float?
   clipSimilarity Float?
   similarUsers   String[]
   burstDetected  Boolean
-  verdict        String
+  verdict        String?
   reasons        String[]
-  latencyMs      Int
+  latencyMs      Int?
   report         String?
   analyzedAt     DateTime @default(now())
 }
