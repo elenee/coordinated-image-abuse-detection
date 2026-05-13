@@ -58,6 +58,20 @@ def score_harm(image: Image.Image) -> tuple[float, str]:
     
     return harm_score, harm_category
 
+
+def get_clip_embedding(image: Image.Image) -> list[float]:
+    image_tensor = clip_preprocess(image).unsqueeze(0)
+    with torch.no_grad():
+        embedding = clip_model.encode_image(image_tensor)
+        embedding /= embedding.norm(dim=-1, keepdim=True)
+    return embedding[0].tolist()
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    dot = sum(x * y for x, y in zip(a, b))
+    return round(dot, 4)
+
+
 async def process_job(message: aio_pika.IncomingMessage):
     async with message.process():
         data = json.loads(message.body.decode())
@@ -70,6 +84,9 @@ async def process_job(message: aio_pika.IncomingMessage):
         try:
             image = Image.open(image_path)
             phash = str(imagehash.phash(image))
+            embedding = get_clip_embedding(image)
+            embedding_key = f"clip:{job_id}"
+            r.set(embedding_key, json.dumps(embedding), ex=HASH_WINDOW_SECONDS)
             harm_score, harm_category = score_harm(image)
             print(f"Harm score: {harm_score}, category: {harm_category}")
 
@@ -97,6 +114,22 @@ async def process_job(message: aio_pika.IncomingMessage):
                 except Exception:
                     continue
 
+            max_clip_similarity = 0.0
+            all_clip_keys = r.keys("clip:*")
+
+            for k in all_clip_keys:
+                stored_job_id = k.replace("clip:", "")
+                if stored_job_id == job_id:
+                    continue
+                try:
+                    stored_embedding = json.loads(r.get(k))
+                    similarity = cosine_similarity(embedding, stored_embedding)
+                    if similarity >= 0.85:
+                        if similarity > max_clip_similarity:
+                            max_clip_similarity = similarity
+                except Exception:
+                    continue
+
             similar_users = list(set(similar_users))
             burst_detected = len(similar_users) >= BURST_THRESHOLD
 
@@ -105,9 +138,9 @@ async def process_job(message: aio_pika.IncomingMessage):
             conn = await asyncpg.connect(DATABASE_URL)
             try:
                 await conn.execute("""
-                    INSERT INTO "Analysis" ("id", "jobId", "pHash", "similarUsers", "burstDetected", "harmScore", "analyzedAt")
-                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
-                """, job_id, phash, similar_users, burst_detected, harm_score)
+                    INSERT INTO "Analysis" ("id", "jobId", "pHash", "similarUsers", "burstDetected", "harmScore", "clipSimilarity", "analyzedAt")
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW())
+                """, job_id, phash, similar_users, burst_detected, harm_score, max_clip_similarity if max_clip_similarity > 0 else None)
 
                 await conn.execute("""
                     UPDATE "Job" SET "status" = 'done' WHERE "id" = $1
@@ -135,7 +168,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Failed to connect to RabbitMQ: {e}")
     yield
-    await connection.close()
+    if connection:
+        await connection.close()
 
 
 app = FastAPI(lifespan=lifespan)
