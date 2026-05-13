@@ -52,6 +52,7 @@ services:
     depends_on:
       - postgres
       - worker
+      - rabbitmq
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/moderation
       - WORKER_URL=http://worker:8000

@@ -12,6 +12,8 @@ import asyncio
 import aio_pika
 from contextlib import asynccontextmanager
 import asyncpg
+import open_clip
+import torch
 
 
 HASH_WINDOW_SECONDS = 86400
@@ -23,6 +25,13 @@ QUEUE_NAME = "analysis_jobs"
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/moderation")
 
 
+print("Loading CLIP model...")
+clip_model, _, clip_preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
+clip_model.eval()
+clip_tokenizer = open_clip.get_tokenizer('ViT-B-32')
+HARM_LABELS = ["normal content", "violence", "weapons", "hate symbols", "explicit content"]
+print("CLIP model loaded.")
+
 
 r = redis.Redis(
     host=os.getenv("REDIS_HOST", "redis"),
@@ -30,6 +39,24 @@ r = redis.Redis(
     decode_responses=True
 )
 
+
+def score_harm(image: Image.Image) -> tuple[float, str]:
+    image_tensor = clip_preprocess(image).unsqueeze(0)
+    text_tokens = clip_tokenizer(HARM_LABELS)
+    
+    with torch.no_grad():
+        image_features = clip_model.encode_image(image_tensor)
+        text_features = clip_model.encode_text(text_tokens)
+        image_features /= image_features.norm(dim=-1, keepdim=True)
+        text_features /= text_features.norm(dim=-1, keepdim=True)
+        probs = (100.0 * image_features @ text_features.T).softmax(dim=-1)[0]
+    
+    probs_list = probs.tolist()
+    normal_prob = probs_list[0]
+    harm_score = round(1.0 - normal_prob, 4)
+    harm_category = HARM_LABELS[probs_list.index(max(probs_list[1:]), 1)]
+    
+    return harm_score, harm_category
 
 async def process_job(message: aio_pika.IncomingMessage):
     async with message.process():
@@ -43,6 +70,8 @@ async def process_job(message: aio_pika.IncomingMessage):
         try:
             image = Image.open(image_path)
             phash = str(imagehash.phash(image))
+            harm_score, harm_category = score_harm(image)
+            print(f"Harm score: {harm_score}, category: {harm_category}")
 
             key = f"phash:{phash}"
             entry = json.dumps({"userId": user_id, "timestamp": time.time()})
@@ -71,14 +100,14 @@ async def process_job(message: aio_pika.IncomingMessage):
             similar_users = list(set(similar_users))
             burst_detected = len(similar_users) >= BURST_THRESHOLD
 
-            print(f"Job {job_id} done — pHash: {phash}, similarUsers: {similar_users}, burst: {burst_detected}")
+            print(f"Job {job_id} done — pHash: {phash}, similarUsers: {similar_users}, burst: {burst_detected}, harm: {harm_score}")
 
             conn = await asyncpg.connect(DATABASE_URL)
             try:
                 await conn.execute("""
-                    INSERT INTO "Analysis" ("id", "jobId", "pHash", "similarUsers", "burstDetected", "analyzedAt")
-                    VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())
-                """, job_id, phash, similar_users, burst_detected)
+                    INSERT INTO "Analysis" ("id", "jobId", "pHash", "similarUsers", "burstDetected", "harmScore", "analyzedAt")
+                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
+                """, job_id, phash, similar_users, burst_detected, harm_score)
 
                 await conn.execute("""
                     UPDATE "Job" SET "status" = 'done' WHERE "id" = $1

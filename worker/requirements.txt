@@ -6,3 +6,4 @@ redis==5.0.8
 python-multipart==0.0.9
 aio-pika==9.4.1
 asyncpg==0.29.0
+open-clip-torch==2.24.0
