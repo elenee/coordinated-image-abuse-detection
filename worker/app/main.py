@@ -9,9 +9,12 @@ import asyncio
 import aio_pika
 from contextlib import asynccontextmanager
 
+
 from clip import score_harm, get_clip_embedding, cosine_similarity
 from fingerprint import store_phash, find_similar_users, store_clip_embedding, find_max_clip_similarity
 from database import save_analysis
+from decision import make_decision
+
 
 BURST_THRESHOLD = int(os.getenv("BURST_THRESHOLD", "3"))
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
@@ -41,9 +44,13 @@ async def process_job(message: aio_pika.IncomingMessage):
             max_clip_similarity = find_max_clip_similarity(job_id, embedding, cosine_similarity)
             burst_detected = len(similar_users) >= BURST_THRESHOLD
 
-            print(f"Job {job_id} done — pHash: {phash}, similarUsers: {similar_users}, burst: {burst_detected}, harm: {harm_score}")
+            decision = make_decision(harm_score, similar_users, burst_detected, max_clip_similarity)
+            verdict = decision["verdict"]
+            reasons = decision["reasons"]
 
-            await save_analysis(job_id, phash, similar_users, burst_detected, harm_score, max_clip_similarity)
+            print(f"Job {job_id} done — pHash: {phash}, verdict: {verdict}, reasons: {reasons}, similarUsers: {similar_users}, burst: {burst_detected}, harm: {harm_score}")
+
+            await save_analysis(job_id, phash, similar_users, burst_detected, harm_score, max_clip_similarity, verdict, reasons)
 
             if os.path.exists(image_path):
                 os.remove(image_path)
