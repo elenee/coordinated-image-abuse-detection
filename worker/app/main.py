@@ -1,75 +1,21 @@
 import io
-import redis
 import imagehash
 from PIL import Image
 from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
-from typing import Optional
 import json
-import time
 import os
 import asyncio
 import aio_pika
 from contextlib import asynccontextmanager
-import asyncpg
-import open_clip
-import torch
 
-
-HASH_WINDOW_SECONDS = 86400
-SIMILARITY_THRESHOLD = 10
+from clip import score_harm, get_clip_embedding, cosine_similarity
+from fingerprint import store_phash, find_similar_users, store_clip_embedding, find_max_clip_similarity
+from database import save_analysis
 
 BURST_THRESHOLD = int(os.getenv("BURST_THRESHOLD", "3"))
 RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@rabbitmq:5672")
 QUEUE_NAME = "analysis_jobs"
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@postgres:5432/moderation")
-
-
-print("Loading CLIP model...")
-clip_model, _, clip_preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai')
-clip_model.eval()
-clip_tokenizer = open_clip.get_tokenizer('ViT-B-32')
-HARM_LABELS = ["normal content", "violence", "weapons", "hate symbols", "explicit content"]
-print("CLIP model loaded.")
-
-
-r = redis.Redis(
-    host=os.getenv("REDIS_HOST", "redis"),
-    port=int(os.getenv("REDIS_PORT", "6379")),
-    decode_responses=True
-)
-
-
-def score_harm(image: Image.Image) -> tuple[float, str]:
-    image_tensor = clip_preprocess(image).unsqueeze(0)
-    text_tokens = clip_tokenizer(HARM_LABELS)
-    
-    with torch.no_grad():
-        image_features = clip_model.encode_image(image_tensor)
-        text_features = clip_model.encode_text(text_tokens)
-        image_features /= image_features.norm(dim=-1, keepdim=True)
-        text_features /= text_features.norm(dim=-1, keepdim=True)
-        probs = (100.0 * image_features @ text_features.T).softmax(dim=-1)[0]
-    
-    probs_list = probs.tolist()
-    normal_prob = probs_list[0]
-    harm_score = round(1.0 - normal_prob, 4)
-    harm_category = HARM_LABELS[probs_list.index(max(probs_list[1:]), 1)]
-    
-    return harm_score, harm_category
-
-
-def get_clip_embedding(image: Image.Image) -> list[float]:
-    image_tensor = clip_preprocess(image).unsqueeze(0)
-    with torch.no_grad():
-        embedding = clip_model.encode_image(image_tensor)
-        embedding /= embedding.norm(dim=-1, keepdim=True)
-    return embedding[0].tolist()
-
-
-def cosine_similarity(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    return round(dot, 4)
 
 
 async def process_job(message: aio_pika.IncomingMessage):
@@ -83,70 +29,21 @@ async def process_job(message: aio_pika.IncomingMessage):
 
         try:
             image = Image.open(image_path)
+
             phash = str(imagehash.phash(image))
             embedding = get_clip_embedding(image)
-            embedding_key = f"clip:{job_id}"
-            r.set(embedding_key, json.dumps(embedding), ex=HASH_WINDOW_SECONDS)
             harm_score, harm_category = score_harm(image)
-            print(f"Harm score: {harm_score}, category: {harm_category}")
 
-            key = f"phash:{phash}"
-            entry = json.dumps({"userId": user_id, "timestamp": time.time()})
-            r.rpush(key, entry)
-            r.expire(key, HASH_WINDOW_SECONDS)
+            store_phash(phash, user_id)
+            store_clip_embedding(job_id, embedding)
 
-            similar_users = []
-            all_keys = r.keys("phash:*")
-
-            for k in all_keys:
-                stored_hash_str = k.replace("phash:", "")
-                try:
-                    stored_hash = imagehash.hex_to_hash(stored_hash_str)
-                    current_hash = imagehash.hex_to_hash(phash)
-                    distance = stored_hash - current_hash
-                    if distance <= SIMILARITY_THRESHOLD:
-                        entries = r.lrange(k, 0, -1)
-                        now = time.time()
-                        for e in entries:
-                            parsed = json.loads(e)
-                            if parsed["userId"] != user_id and (now - parsed["timestamp"]) <= HASH_WINDOW_SECONDS:
-                                similar_users.append(parsed["userId"])
-                except Exception:
-                    continue
-
-            max_clip_similarity = 0.0
-            all_clip_keys = r.keys("clip:*")
-
-            for k in all_clip_keys:
-                stored_job_id = k.replace("clip:", "")
-                if stored_job_id == job_id:
-                    continue
-                try:
-                    stored_embedding = json.loads(r.get(k))
-                    similarity = cosine_similarity(embedding, stored_embedding)
-                    if similarity >= 0.85:
-                        if similarity > max_clip_similarity:
-                            max_clip_similarity = similarity
-                except Exception:
-                    continue
-
-            similar_users = list(set(similar_users))
+            similar_users = find_similar_users(phash, user_id)
+            max_clip_similarity = find_max_clip_similarity(job_id, embedding, cosine_similarity)
             burst_detected = len(similar_users) >= BURST_THRESHOLD
 
             print(f"Job {job_id} done — pHash: {phash}, similarUsers: {similar_users}, burst: {burst_detected}, harm: {harm_score}")
 
-            conn = await asyncpg.connect(DATABASE_URL)
-            try:
-                await conn.execute("""
-                    INSERT INTO "Analysis" ("id", "jobId", "pHash", "similarUsers", "burstDetected", "harmScore", "clipSimilarity", "analyzedAt")
-                    VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW())
-                """, job_id, phash, similar_users, burst_detected, harm_score, max_clip_similarity if max_clip_similarity > 0 else None)
-
-                await conn.execute("""
-                    UPDATE "Job" SET "status" = 'done' WHERE "id" = $1
-                """, job_id)
-            finally:
-                await conn.close()
+            await save_analysis(job_id, phash, similar_users, burst_detected, harm_score, max_clip_similarity)
 
             if os.path.exists(image_path):
                 os.remove(image_path)
@@ -157,6 +54,7 @@ async def process_job(message: aio_pika.IncomingMessage):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    connection = None
     print(f"Connecting to RabbitMQ at {RABBITMQ_URL}")
     try:
         connection = await aio_pika.connect_robust(RABBITMQ_URL)
@@ -191,31 +89,8 @@ async def fingerprint(
     image = Image.open(io.BytesIO(contents))
     phash = str(imagehash.phash(image))
 
-    key = f"phash:{phash}"
-    entry = json.dumps({"userId": userId, "timestamp": time.time()})
-    r.rpush(key, entry)
-    r.expire(key, HASH_WINDOW_SECONDS)
-
-    similar_users = []
-    all_keys = r.keys("phash:*")
-
-    for k in all_keys:
-        stored_hash_str = k.replace("phash:", "")
-        try:
-            stored_hash = imagehash.hex_to_hash(stored_hash_str)
-            current_hash = imagehash.hex_to_hash(phash)
-            distance = stored_hash - current_hash
-            if distance <= SIMILARITY_THRESHOLD:
-                entries = r.lrange(k, 0, -1)
-                for e in entries:
-                    parsed = json.loads(e)
-                    now = time.time()
-                    if parsed["userId"] != userId and (now - parsed["timestamp"]) <= HASH_WINDOW_SECONDS:
-                        similar_users.append(parsed["userId"])
-        except Exception:
-            continue
-
-    similar_users = list(set(similar_users))
+    store_phash(phash, userId)
+    similar_users = find_similar_users(phash, userId)
     burst_detected = len(similar_users) >= BURST_THRESHOLD
 
     return FingerprintResult(

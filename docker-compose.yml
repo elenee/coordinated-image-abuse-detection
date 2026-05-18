@@ -19,6 +19,11 @@ services:
     
   rabbitmq:
     image: rabbitmq:3-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -34,7 +39,10 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -50,9 +58,12 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - postgres
-      - worker
-      - rabbitmq
+      postgres:
+        condition: service_started
+      worker:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/moderation
       - WORKER_URL=http://worker:8000
