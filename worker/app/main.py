@@ -14,6 +14,7 @@ from clip import score_harm, get_clip_embedding, cosine_similarity
 from fingerprint import store_phash, find_similar_users, store_clip_embedding, find_max_clip_similarity
 from database import save_analysis
 from decision import make_decision
+from llm_report import generate_report
 
 
 BURST_THRESHOLD = int(os.getenv("BURST_THRESHOLD", "3"))
@@ -50,7 +51,13 @@ async def process_job(message: aio_pika.IncomingMessage):
 
             print(f"Job {job_id} done — pHash: {phash}, verdict: {verdict}, reasons: {reasons}, similarUsers: {similar_users}, burst: {burst_detected}, harm: {harm_score}")
 
-            await save_analysis(job_id, phash, similar_users, burst_detected, harm_score, max_clip_similarity, verdict, reasons)
+            report = await generate_report(
+                job_id, user_id, verdict, reasons,
+                harm_score, similar_users, burst_detected, max_clip_similarity
+            )
+
+            await save_analysis(job_id, phash, similar_users, burst_detected, 
+                    harm_score, max_clip_similarity, verdict, reasons, report)
 
             if os.path.exists(image_path):
                 os.remove(image_path)
