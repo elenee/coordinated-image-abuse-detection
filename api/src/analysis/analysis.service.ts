@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
-import axios from 'axios';
-import FormData = require('form-data');
 import { RabbitmqService } from 'src/rabbitmq/rabbitmq.service';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -34,20 +32,10 @@ export class AnalysisService {
     }
   }
 
-  private async callWorker(file: Express.Multer.File, userId: string) {
-    const form = new FormData();
-    form.append('file', file.buffer, {
-      filename: file.originalname,
-      contentType: file.mimetype,
+  async getJob(jobId: string) {
+    const job = await this.prisma.job.findUnique({
+      where: { id: jobId }
     });
-    form.append('userId', userId);
-
-    const response = await axios.post(
-      `${process.env.WORKER_URL}/fingerprint`,
-      form,
-      { headers: form.getHeaders() },
-    );
-
-    return response.data;
+    return job;
   }
 }
