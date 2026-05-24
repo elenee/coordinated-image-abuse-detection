@@ -15,6 +15,7 @@ from fingerprint import store_phash, find_similar_users, store_clip_embedding, f
 from database import save_analysis
 from decision import make_decision
 from llm_report import generate_report
+from fingerprint import check_user_burst
 
 
 BURST_THRESHOLD = int(os.getenv("BURST_THRESHOLD", "3"))
@@ -43,7 +44,7 @@ async def process_job(message: aio_pika.IncomingMessage):
 
             similar_users = find_similar_users(phash, user_id)
             max_clip_similarity = find_max_clip_similarity(job_id, embedding, cosine_similarity)
-            burst_detected = len(similar_users) >= BURST_THRESHOLD
+            burst_detected = len(similar_users) >= BURST_THRESHOLD or check_user_burst(user_id)
 
             decision = make_decision(harm_score, similar_users, burst_detected, max_clip_similarity)
             verdict = decision["verdict"]
@@ -105,7 +106,7 @@ async def fingerprint(
 
     store_phash(phash, userId)
     similar_users = find_similar_users(phash, userId)
-    burst_detected = len(similar_users) >= BURST_THRESHOLD
+    burst_detected = len(similar_users) >= BURST_THRESHOLD or check_user_burst(userId)
 
     return FingerprintResult(
         pHash=phash,

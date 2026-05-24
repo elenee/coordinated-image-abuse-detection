@@ -7,6 +7,9 @@ from PIL import Image
 
 HASH_WINDOW_SECONDS = 86400
 SIMILARITY_THRESHOLD = 10
+BURST_COUNT_THRESHOLD = 3
+BURST_WINDOW_SECONDS = 60
+
 
 r = redis_lib.Redis(
     host=os.getenv("REDIS_HOST", "redis"),
@@ -14,22 +17,12 @@ r = redis_lib.Redis(
     decode_responses=True
 )
 
-import json
-import time
-import os
-import imagehash
-import redis as redis_lib
-from PIL import Image
-
-HASH_WINDOW_SECONDS = 86400
-SIMILARITY_THRESHOLD = 10
-
-r = redis_lib.Redis(
-    host=os.getenv("REDIS_HOST", "redis"),
-    port=int(os.getenv("REDIS_PORT", "6379")),
-    decode_responses=True
-)
-
+def check_user_burst(user_id: str) -> bool:
+    key = f"burst:{user_id}"
+    count = r.incr(key)
+    if count == 1:
+        r.expire(key, BURST_WINDOW_SECONDS)
+    return count >= BURST_COUNT_THRESHOLD
 
 def store_phash(phash: str, user_id: str):
     key = f"phash:{phash}"

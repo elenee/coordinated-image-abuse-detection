@@ -16,7 +16,10 @@ def make_decision(
             verdict = "suspicious"
 
     if burst_detected:
-        reasons.append(f"coordinated burst across {len(similar_users)} accounts")
+        if len(similar_users) >= 1:
+            reasons.append(f"coordinated burst across {len(similar_users)} accounts")
+        else:
+            reasons.append(f"rapid repeat uploads detected")
         verdict = "flagged"
     elif len(similar_users) >= 1:
         reasons.append(f"same image seen from {len(similar_users)} other account(s): {similar_users}")
