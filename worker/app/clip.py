@@ -22,9 +22,11 @@ def score_harm(image: Image.Image) -> tuple[float, str]:
         probs = (100.0 * image_features @ text_features.T).softmax(dim=-1)[0]
     
     probs_list = probs.tolist()
-    normal_prob = probs_list[0]
-    harm_score = round(1.0 - normal_prob, 4)
-    harm_category = HARM_LABELS[probs_list.index(max(probs_list[1:]), 1)]
+    # normal_prob = probs_list[0]
+    # harm_score = round(1.0 - normal_prob, 4)
+    harm_probs = probs_list[1:]
+    harm_score = round(max(harm_probs), 4)
+    harm_category = HARM_LABELS[probs_list.index(max(harm_probs), 1)]
     
     return harm_score, harm_category
 
