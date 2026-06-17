@@ -1,0 +1,13 @@
+scenario,image_file,user_id,expected_verdict,actual_verdict,risk_score,correct,abuse_correct,upload_index,upload_latency,total_latency,worker_latency,clip_latency,redis_latency,db_latency,decision_latency,error,iteration,config
+coordinated,attack.jpg,user_A,clean,clean,0.6283,True,True,1,0.03385739999976067,0.6555157999991934,0.5075,0.4981,0.009,0.0,0.0,,1,full
+coordinated,attack.jpg,user_B,suspicious,suspicious,0.6283,True,True,2,0.050212300000566756,0.6853300999991916,0.4568,0.4474,0.0091,0.0,0.0,,1,full
+coordinated,attack.jpg,user_C,flagged,suspicious,0.6283,False,True,3,0.05342730000120355,0.6867656000013085,0.4503,0.439,0.0108,0.0,0.0,,1,full
+burst,attack.jpg,user_burst,clean,flagged,0.6283,False,False,1,0.01344980000067153,0.6533125000005384,0.4776,0.4667,0.0107,0.0,0.0,,1,full
+burst,attack.jpg,user_burst,suspicious,flagged,0.6283,False,True,2,0.05593150000095193,0.6946105000024545,0.4858,0.4743,0.0112,0.0,0.0,,1,full
+burst,attack.jpg,user_burst,flagged,flagged,0.6283,True,True,3,0.013622699998450116,0.6496349999979429,0.4552,0.4437,0.0109,0.0,0.0,,1,full
+near_duplicate,attack.jpg,user_X,clean,flagged,0.6283,False,False,1,0.01366999999845575,0.6547680999974546,0.4925,0.4818,0.0103,0.0,0.0,,1,full
+near_duplicate,near_1.jpg,user_Y,suspicious,clean,0.6791,False,False,2,0.016386699999202392,0.6484453999983089,0.5589,0.5468,0.0117,0.0,0.0,,1,full
+near_duplicate,attack.jpg,user_Z,suspicious,flagged,0.6283,False,True,3,0.010964099999910104,0.6490303999999014,0.561,0.5461,0.0146,0.0,0.0,,1,full
+clean_baseline,cat.jpg,user_clean_1,clean,clean,0.2443,True,True,1,0.054066800001237425,0.68084380000073,0.5627,0.5462,0.0163,0.0,0.0,,1,full
+clean_baseline,mountain.jpg,user_clean_2,clean,clean,0.1774,True,True,2,0.056254099999932805,0.6852878999998211,0.4746,0.4581,0.0161,0.0,0.0,,1,full
+clean_baseline,city.jpg,user_clean_3,clean,clean,0.1856,True,True,3,0.014648999998826184,0.6518288999996003,0.5,0.4811,0.0183,0.0,0.0,,1,full

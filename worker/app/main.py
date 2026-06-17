@@ -8,6 +8,7 @@ import os
 import asyncio
 import aio_pika
 from contextlib import asynccontextmanager
+import time
 
 
 from clip import score_harm, get_clip_embedding, cosine_similarity
@@ -33,24 +34,39 @@ async def process_job(message: aio_pika.IncomingMessage):
         print(f"Processing job {job_id} for user {user_id}")
 
         try:
+            job_start = time.perf_counter()
             image = Image.open(image_path)
 
-            phash = str(imagehash.phash(image))
+            clip_start = time.perf_counter()
             embedding = get_clip_embedding(image)
             harm_score, harm_category = score_harm(image)
+            clip_end = time.perf_counter()
 
+            redis_start = time.perf_counter()
+            phash = str(imagehash.phash(image))
             store_phash(phash, user_id)
             store_clip_embedding(job_id, embedding)
 
             similar_users = find_similar_users(phash, user_id)
             max_clip_similarity = find_max_clip_similarity(job_id, embedding, cosine_similarity)
             burst_detected = len(similar_users) >= BURST_THRESHOLD or check_user_burst(user_id)
+            redis_end = time.perf_counter()
 
+            decision_start = time.perf_counter()
             decision = make_decision(harm_score, similar_users, burst_detected, max_clip_similarity)
             verdict = decision["verdict"]
             reasons = decision["reasons"]
+            decision_end = time.perf_counter()
 
-            print(f"Job {job_id} done — pHash: {phash}, verdict: {verdict}, reasons: {reasons}, similarUsers: {similar_users}, burst: {burst_detected}, harm: {harm_score}")
+            timing = {
+                "clip":     round(clip_end - clip_start,     4),
+                "redis":    round(redis_end - redis_start,    4),
+                "decision": round(decision_end - decision_start, 4),
+                "worker":   round(time.perf_counter() - job_start, 4),
+                "db": 0
+            }
+
+            print(f"Job {job_id} done — pHash: {phash}, verdict: {verdict}, reasons: {reasons}, similarUsers: {similar_users}, burst: {burst_detected}, harm: {harm_score}, timing: {timing}")
 
             report = await generate_report(
                 job_id, user_id, verdict, reasons,
@@ -58,7 +74,7 @@ async def process_job(message: aio_pika.IncomingMessage):
             )
 
             await save_analysis(job_id, phash, similar_users, burst_detected, 
-                    harm_score, max_clip_similarity, verdict, reasons, report)
+                    harm_score, max_clip_similarity, verdict, reasons, report, timing)
 
             if os.path.exists(image_path):
                 os.remove(image_path)

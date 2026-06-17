@@ -9,9 +9,9 @@ const UPLOADS_DIR = '/uploads';
 
 @Injectable()
 export class AnalysisService {
-  constructor(private prisma: PrismaService, private rabbitmq: RabbitmqService){}
+  constructor(private prisma: PrismaService, private rabbitmq: RabbitmqService) { }
 
-  async createJob(file: Express.Multer.File, userId: string){
+  async createJob(file: Express.Multer.File, userId: string) {
     const job = await this.prisma.job.create({
       data: {
         userId,
@@ -34,8 +34,16 @@ export class AnalysisService {
 
   async getJob(jobId: string) {
     const job = await this.prisma.job.findUnique({
-      where: { id: jobId }
+      where: { id: jobId },
+      include: {analysis: true}
     });
-    return job;
+    if (!job) return null;
+
+    return {
+      status: job.analysis ? "completed" : "pending",
+      verdict: job.analysis?.verdict ?? null,
+      riskScore: job.analysis?.harmScore ?? null,
+      timing: job.analysis?.timing ?? null,
+    };
   }
 }

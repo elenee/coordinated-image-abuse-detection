@@ -2,3 +2,4 @@ httpx
 Pillow
 redis
 python-dotenv
+aiofiles>=23.0

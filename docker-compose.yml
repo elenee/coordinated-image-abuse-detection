@@ -50,7 +50,6 @@ services:
       - BURST_THRESHOLD=3
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/moderation
-      - ENABLE_LLM_REPORT=false
     volumes:
       - uploads_data:/uploads
       
